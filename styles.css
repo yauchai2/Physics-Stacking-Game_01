@@ -82,7 +82,6 @@ body {
   left: 14px;
   right: 14px;
   top: 52%;
-  transform: translateY(-50%);
   z-index: 4;
   pointer-events: none;
   display: flex;

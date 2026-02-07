@@ -18,6 +18,8 @@
   const pauseBtn = document.getElementById("pauseBtn");
   const musicBtn = document.getElementById("musicBtn");
   const restartBtn = document.getElementById("restartBtn");
+  const skipLevelBtn = document.getElementById("skipLevelBtn");
+  const antiFallBtn = document.getElementById("antiFallBtn");
   const playAgainBtn = document.getElementById("playAgain");
   const overlay = document.getElementById("overlay");
   const fireworksCanvas = document.getElementById("fireworksCanvas");
@@ -31,10 +33,14 @@
   const GROUND_Y = HEIGHT - 64;
   const MAX_PLACE_Y = Math.round(HEIGHT * 0.56);
   const LEVELS = {
-    1: { targetRatio: 0.6, targetTopPercent: 60 },
-    2: { targetRatio: 0.52, targetTopPercent: 52 },
-    3: { targetRatio: 0.44, targetTopPercent: 44 }
+    1: { targetRatio: 0.62 },
+    2: { targetRatio: 0.56 },
+    3: { targetRatio: 0.5 },
+    4: { targetRatio: 0.44 },
+    5: { targetRatio: 0.38 },
+    6: { targetRatio: 0.32 }
   };
+  const MAX_LEVEL = Math.max(...Object.keys(LEVELS).map(Number));
 
   const engine = Engine.create({
     gravity: { x: 0, y: 1.05 },
@@ -61,14 +67,22 @@
 
   const ground = Bodies.rectangle(WIDTH / 2, GROUND_Y, 400, 24, {
     isStatic: true,
-    friction: 0.98,
-    frictionStatic: 1,
+    friction: 1,
+    frictionStatic: 1.5,
     restitution: 0.05,
     chamfer: { radius: 10 },
     render: { fillStyle: "#a8afb9" }
   });
+  const groundGuard = Bodies.rectangle(WIDTH / 2, GROUND_Y + 14, 420, 20, {
+    isStatic: true,
+    friction: 1,
+    frictionStatic: 1.5,
+    restitution: 0,
+    render: { visible: false }
+  });
 
-  World.add(engine.world, ground);
+  World.add(engine.world, [ground, groundGuard]);
+  let groundWidth = 400;
 
   const ASSET_META = {
     boxBlue: { texture: "assets/box-blue.svg", width: 164, height: 237 },
@@ -79,7 +93,11 @@
     eggGreen: { texture: "assets/egg-green.svg", width: 114, height: 116 },
     eggPink: { texture: "assets/egg-pink.svg", width: 114, height: 116 },
     bird: { texture: "assets/chocolate-bird.svg", width: 87, height: 94 },
-    rabbit: { texture: "assets/chocolate-rabbit.svg", width: 115, height: 165 }
+    rabbit: { texture: "assets/chocolate-rabbit-black.png", width: 630, height: 906 },
+    chicken: { texture: "assets/chocolate-chicken.png", width: 735, height: 774 },
+    chocoEggs: { texture: "assets/chocolate-eggs.png", width: 606, height: 663 },
+    rabbitWhite: { texture: "assets/chocolate-rabbit-white.png", width: 630, height: 906 },
+    donut: { texture: "assets/donut.png", width: 756, height: 756 }
   };
   const TETROMINO_SHAPES = {
     boxBlue: [[0, 0], [1, 0], [2, 0], [2, 1]],
@@ -90,6 +108,12 @@
   const SIZE_UP = 1.34;
   const HITBOX_SCALE = 0.98;
   const SPRITE_FILL_SCALE = 0.88;
+  const ROLL_RESIST = {
+    frictionMul: 1.28,
+    frictionStatic: 1.5,
+    frictionAirMul: 1.35,
+    restitutionMul: 0.82
+  };
 
   const pieceCatalog = [
     {
@@ -145,9 +169,37 @@
       weight: 1,
       preview: ASSET_META.rabbit.texture,
       maker: (x, y) => makeSpriteRect(x, y, 52 * SIZE_UP, 74 * SIZE_UP, ASSET_META.rabbit, 0.94, 0.13, 0.002, 1.1)
+    },
+    {
+      kind: "chocoChicken",
+      weight: 2,
+      preview: ASSET_META.chicken.texture,
+      maker: (x, y) => makeSpriteCircle(x, y, 27 * SIZE_UP, ASSET_META.chicken, 0.92, 0.16, 0.00195, 1.08)
+    },
+    {
+      kind: "chocoEggs",
+      weight: 1,
+      availableFrom: 3,
+      preview: ASSET_META.chocoEggs.texture,
+      maker: (x, y) => makeSpriteEllipse(x, y, 30 * SIZE_UP, 33 * SIZE_UP, ASSET_META.chocoEggs, 0.9, 0.2, 0.00185, 1.1)
+    },
+    {
+      kind: "chocoRabbitWhite",
+      weight: 1,
+      availableFrom: 3,
+      preview: ASSET_META.rabbitWhite.texture,
+      maker: (x, y) => makeSpriteRect(x, y, 52 * SIZE_UP, 74 * SIZE_UP, ASSET_META.rabbitWhite, 0.94, 0.13, 0.002, 1.1)
+    },
+    {
+      kind: "donut",
+      weight: 1,
+      availableFrom: 3,
+      preview: ASSET_META.donut.texture,
+      maker: (x, y) => makeSpriteCircle(x, y, 28 * SIZE_UP, ASSET_META.donut, 0.9, 0.18, 0.00195, 1.08)
     }
   ];
 
+  let currentLevel = 1;
   let currentPiece = null;
   let droppedBodies = [];
   let pending = randomPiece();
@@ -158,7 +210,6 @@
   let towerTopY = GROUND_Y;
   let stableFrames = 0;
   const WIN_SETTLE_MS = 900;
-  let currentLevel = 1;
   let currentTargetY = HEIGHT * LEVELS[1].targetRatio;
   let roundResult = null;
   const fireworksCtx = fireworksCanvas.getContext("2d");
@@ -166,9 +217,11 @@
   let fireworksAnimId = null;
   let fireworksSpawnTimer = null;
   let audioCtx = null;
-  let bgmTimer = null;
-  let bgmStep = 0;
   let musicOn = true;
+  const bgmAudio = new Audio("assets/bgm.mp3");
+  bgmAudio.loop = true;
+  bgmAudio.volume = 0.48;
+  bgmAudio.preload = "auto";
 
   setupInputs();
   applyLevel(1);
@@ -180,9 +233,66 @@
     runner.enabled = !paused;
     pauseBtn.textContent = paused ? "▶" : "II";
   });
-  musicBtn.addEventListener("click", toggleMusic);
+  // Hide tester-only buttons initially
+  if (skipLevelBtn) skipLevelBtn.style.display = "none";
+  if (antiFallBtn) antiFallBtn.style.display = "none";
 
+  // Reveal tester buttons only when tester performs 30 clicks within 10 seconds
+  let testerClicks = 0;
+  let testerWindowStart = 0;
+  let testerRevealed = false;
+  const TESTER_CLICK_TARGET = 30;
+  const TESTER_WINDOW_MS = 10000;
+  function revealTesterButtons() {
+    if (skipLevelBtn) skipLevelBtn.style.display = "inline-block";
+    if (antiFallBtn) antiFallBtn.style.display = "inline-block";
+    testerRevealed = true;
+  }
+
+  musicBtn.addEventListener("click", () => {
+    const now = performance.now();
+    if (testerRevealed) {
+      toggleMusic();
+      return;
+    }
+    if (!testerWindowStart || now - testerWindowStart > TESTER_WINDOW_MS) {
+      testerWindowStart = now;
+      testerClicks = 1;
+    } else {
+      testerClicks += 1;
+    }
+
+    if (testerClicks >= TESTER_CLICK_TARGET) {
+      revealTesterButtons();
+    }
+    toggleMusic();
+  });
   restartBtn.addEventListener("click", () => resetGame(1));
+  if (skipLevelBtn) {
+    skipLevelBtn.addEventListener("click", () => {
+      const next = currentLevel < MAX_LEVEL ? currentLevel + 1 : 1;
+      resetGame(next);
+    });
+  }
+  // Anti-fall toggle for testers: prevent objects falling below ground
+  let antiFallEnabled = false;
+  if (antiFallBtn) {
+    antiFallBtn.addEventListener("click", () => {
+      antiFallEnabled = !antiFallEnabled;
+      antiFallBtn.textContent = antiFallEnabled ? "Anti-Fall: ON" : "Anti-Fall";
+      // when disabling, restore any bodies we previously forced static
+      if (!antiFallEnabled) {
+        for (const b of Composite.allBodies(engine.world)) {
+          if (b.plugin && b.plugin.preventedFall) {
+            try {
+              Body.setStatic(b, false);
+              b.plugin.preventedFall = false;
+            } catch (e) {}
+          }
+        }
+      }
+    });
+  }
   playAgainBtn.addEventListener("click", onOverlayAction);
   window.addEventListener("resize", () => {
     if (fireworksAnimId) resizeFireworksCanvas();
@@ -197,9 +307,55 @@
     }
 
     updateHeight();
+    clampDroppedBodyVelocity();
+
+    // Auto-set dropped bodies to static after 5 seconds
+    const now = performance.now();
+    const AUTO_STATIC_MS = 5000;
+    for (let i = 0; i < droppedBodies.length; i++) {
+      const b = droppedBodies[i];
+      if (!b) continue;
+      const droppedAt = b.plugin?.droppedAt ?? 0;
+      if (!droppedAt) continue;
+      if (b.plugin?.autoStatic) continue;
+      if (now - droppedAt >= AUTO_STATIC_MS) {
+        try {
+          Body.setVelocity(b, { x: 0, y: 0 });
+          Body.setAngularVelocity(b, 0);
+          Body.setStatic(b, true);
+          b.plugin.autoStatic = true;
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+
+    // If anti-fall enabled, keep bodies from falling below ground
+    if (antiFallEnabled) {
+      for (const body of Composite.allBodies(engine.world)) {
+        if (!body || body === ground || body === groundGuard) continue;
+        // skip static bodies
+        if (body.isStatic) continue;
+        // compute half-height from bounds
+        const halfH = ((body.bounds?.max.y ?? body.position.y) - (body.bounds?.min.y ?? body.position.y)) / 2 || 12;
+        const minY = GROUND_Y - halfH - 2;
+        if (body.position.y > minY) {
+          try {
+            Body.setPosition(body, { x: body.position.x, y: minY });
+            Body.setVelocity(body, { x: 0, y: 0 });
+            Body.setAngularVelocity(body, 0);
+            Body.setStatic(body, true);
+            body.plugin = body.plugin || {};
+            body.plugin.preventedFall = true;
+          } catch (e) {}
+        }
+      }
+    }
+
     if (checkWinCondition()) return;
     checkEndCondition();
   });
+  Events.on(engine, "collisionStart", onCollisionStart);
 
   function setupInputs() {
     const canvas = render.canvas;
@@ -280,12 +436,10 @@
     const body = currentPiece.body;
     body.plugin = body.plugin || {};
     body.plugin.droppedAt = performance.now();
+    body.plugin.dropped = true;
     resolveDropOverlap(body);
     body.collisionFilter.mask = 0xFFFFFFFF;
     Body.setStatic(body, false);
-    for (const part of body.parts) {
-      if (part.isStatic) Body.setStatic(part, false);
-    }
     body.isSleeping = false;
     Body.setVelocity(body, { x: (Math.random() - 0.5) * 0.04, y: 0.6 });
     Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.012);
@@ -310,6 +464,9 @@
 
     const spawnPos = { x: WIDTH / 2, y: 96 };
     const body = descriptor.maker(spawnPos.x, spawnPos.y);
+    body.plugin = body.plugin || {};
+    body.plugin.gamePiece = true;
+    body.plugin.dropped = false;
 
     Body.setStatic(body, true);
     body.collisionFilter.mask = 0;
@@ -326,15 +483,28 @@
   }
 
   function randomPiece() {
+    const pool = getPiecePoolForLevel(currentLevel);
     let totalWeight = 0;
-    for (const p of pieceCatalog) totalWeight += p.weight ?? 1;
+    for (const p of pool) totalWeight += getPieceWeightForLevel(p, currentLevel);
 
     let roll = Math.random() * totalWeight;
-    for (const p of pieceCatalog) {
-      roll -= p.weight ?? 1;
+    for (const p of pool) {
+      roll -= getPieceWeightForLevel(p, currentLevel);
       if (roll <= 0) return p;
     }
-    return pieceCatalog[pieceCatalog.length - 1];
+    return pool[pool.length - 1];
+  }
+
+  function getPiecePoolForLevel(level) {
+    const pool = pieceCatalog.filter((p) => (p.availableFrom ?? 1) <= level);
+    return pool.length ? pool : pieceCatalog;
+  }
+
+  function getPieceWeightForLevel(piece, level) {
+    const base = piece.weight ?? 1;
+    const isBlock = piece.kind === "boxBlue" || piece.kind === "boxGreen" || piece.kind === "boxOrange" || piece.kind === "boxRed";
+    if (level <= 2 && !isBlock) return base * 0.35;
+    return base;
   }
 
   function updateNextPanel() {
@@ -400,16 +570,36 @@
   function endRound(result) {
     if (gameEnded) return;
 
-    gameEnded = true;
-    paused = true;
-    runner.enabled = false;
     if (spawnTimer) {
       clearTimeout(spawnTimer);
       spawnTimer = null;
     }
+
+    // If final level victory, play explosion animation first
+    if (result === "win" && currentLevel >= MAX_LEVEL) {
+      // mark as ended to avoid double triggers but keep physics running for explosion
+      gameEnded = true;
+      roundResult = result;
+      doFinalExplosion(() => {
+        // after explosion, show overlay and pause
+        paused = true;
+        runner.enabled = false;
+        showEndOverlay(result);
+      });
+      return;
+    }
+
+    // default behavior for other cases
+    gameEnded = true;
+    paused = true;
+    runner.enabled = false;
     roundResult = result;
+    showEndOverlay(result);
+  }
+
+  function showEndOverlay(result) {
     if (result === "win") {
-      if (currentLevel < 3) {
+      if (currentLevel < MAX_LEVEL) {
         resultTitle.textContent = `Level ${currentLevel} Complete!`;
         finalHeight.textContent = `Height: ${heightValue.textContent} · Next: Level ${currentLevel + 1}`;
         playAgainBtn.textContent = "Next Level";
@@ -432,8 +622,123 @@
     }
   }
 
+  function doFinalExplosion(doneCb) {
+    // Ensure fireworks running
+    startFireworks();
+
+    const centerX = WIDTH / 2;
+    const centerY = towerTopY || HEIGHT / 2;
+
+    // Create fragments for each dropped body
+    const newFragments = [];
+    const FRAG_PALETTE = ["#ffd166", "#ffb4a2", "#8dd3ff", "#9be7a8", "#f6b0cc", "#c7b5ff", "#d0d0d0", "#a8afb9", "#f27b1b", "#2e64d3"];
+    for (const b of droppedBodies) {
+      if (!b) continue;
+      try {
+        const bounds = b.bounds || { max: { x: b.position.x + 8, y: b.position.y + 8 }, min: { x: b.position.x - 8, y: b.position.y - 8 } };
+        const bw = Math.max(12, bounds.max.x - bounds.min.x);
+        const bh = Math.max(12, bounds.max.y - bounds.min.y);
+
+
+        // estimate number of fragments based on area (clamped), doubled again for denser shards
+        const area = bw * bh;
+        let count = Math.min(72, Math.max(24, Math.round(area / 900) * 4));
+
+        // pick color: sometimes use original, otherwise random from palette
+        const baseColor = (b.render && b.render.fillStyle) || null;
+        const color = (baseColor && Math.random() < 0.4) ? baseColor : FRAG_PALETTE[Math.floor(Math.random() * FRAG_PALETTE.length)];
+
+        // remove original body
+        try { Composite.remove(engine.world, b); } catch (e) {}
+
+        for (let i = 0; i < count; i++) {
+          const fx = b.position.x + (Math.random() - 0.5) * bw * 0.8;
+          const fy = b.position.y + (Math.random() - 0.5) * bh * 0.8;
+          // irregular fragment: random sides and size
+          const minSz = 4;
+          const maxSz = Math.max(10, Math.round(Math.min(bw, bh) / 3));
+          const sz = minSz + Math.random() * (maxSz - minSz);
+          const sides = 3 + Math.floor(Math.random() * 5); // 3..7 sides
+          const frag = Bodies.polygon(fx, fy, sides, sz / 2, {
+            chamfer: { radius: 0.6 },
+            friction: 0.9,
+            frictionAir: 0.02,
+            restitution: 0.2,
+            density: Math.max(0.0006, (b.density || 0.001) * 0.5),
+            render: { fillStyle: color }
+          });
+          Body.setAngle(frag, Math.random() * Math.PI * 2);
+          // give outward velocity
+          const dx = frag.position.x - centerX;
+          const dy = frag.position.y - centerY;
+          const d = Math.max(8, Math.hypot(dx, dy));
+          const nx = dx / d;
+          const ny = dy / d;
+          const speed = 4 + Math.random() * 5;
+          Body.setVelocity(frag, { x: nx * speed + (Math.random() - 0.5) * 2, y: ny * speed - (2 + Math.random() * 3) });
+          Body.setAngularVelocity(frag, (Math.random() - 0.5) * 6);
+          World.add(engine.world, frag);
+          newFragments.push(frag);
+        }
+      } catch (e) {
+        // ignore single body failures
+      }
+    }
+
+    // Also fragment currentPiece if present
+    if (currentPiece && currentPiece.body) {
+      const b = currentPiece.body;
+      try {
+        const bounds = b.bounds || { max: { x: b.position.x + 8, y: b.position.y + 8 }, min: { x: b.position.x - 8, y: b.position.y - 8 } };
+        const bw = Math.max(12, bounds.max.x - bounds.min.x);
+        const bh = Math.max(12, bounds.max.y - bounds.min.y);
+        const area = bw * bh;
+        let count = Math.min(72, Math.max(24, Math.round(area / 900) * 4));
+        const baseColor = (b.render && b.render.fillStyle) || null;
+        const color = (baseColor && Math.random() < 0.4) ? baseColor : FRAG_PALETTE[Math.floor(Math.random() * FRAG_PALETTE.length)];
+        try { Composite.remove(engine.world, b); } catch (e) {}
+        for (let i = 0; i < count; i++) {
+          const fx = b.position.x + (Math.random() - 0.5) * bw * 0.8;
+          const fy = b.position.y + (Math.random() - 0.5) * bh * 0.8;
+          const minSz = 4;
+          const maxSz = Math.max(10, Math.round(Math.min(bw, bh) / 3));
+          const sz = minSz + Math.random() * (maxSz - minSz);
+          const sides = 3 + Math.floor(Math.random() * 5);
+          const frag = Bodies.polygon(fx, fy, sides, sz / 2, {
+            chamfer: { radius: 0.6 },
+            friction: 0.9,
+            frictionAir: 0.02,
+            restitution: 0.2,
+            density: Math.max(0.0006, (b.density || 0.001) * 0.5),
+            render: { fillStyle: color }
+          });
+          Body.setAngle(frag, Math.random() * Math.PI * 2);
+          const dx = frag.position.x - centerX;
+          const dy = frag.position.y - centerY;
+          const d = Math.max(8, Math.hypot(dx, dy));
+          const nx = dx / d;
+          const ny = dy / d;
+          const speed = 4 + Math.random() * 5;
+          Body.setVelocity(frag, { x: nx * speed + (Math.random() - 0.5) * 2, y: ny * speed - (2 + Math.random() * 3) });
+          Body.setAngularVelocity(frag, (Math.random() - 0.5) * 6);
+          World.add(engine.world, frag);
+          newFragments.push(frag);
+        }
+      } catch (e) {}
+    }
+
+    // replace droppedBodies with fragments so later checks operate on them
+    droppedBodies = newFragments;
+
+    // let fragments fly for a bit then call done (extended by 2000ms)
+    const EXPLODE_MS = 1400 + 2000;
+    setTimeout(() => {
+      if (typeof doneCb === "function") doneCb();
+    }, EXPLODE_MS);
+  }
+
   function onOverlayAction() {
-    if (roundResult === "win" && currentLevel < 3) {
+    if (roundResult === "win" && currentLevel < MAX_LEVEL) {
       resetGame(currentLevel + 1);
       return;
     }
@@ -463,7 +768,7 @@
 
     // Ensure no previous round bodies remain in the physics world.
     for (const b of Composite.allBodies(engine.world)) {
-      if (b.id !== ground.id) Composite.remove(engine.world, b);
+      if (b.id !== ground.id && b.id !== groundGuard.id) Composite.remove(engine.world, b);
     }
     droppedBodies = [];
     towerTopY = GROUND_Y;
@@ -478,11 +783,33 @@
   }
 
   function applyLevel(level) {
-    currentLevel = clamp(Math.round(level), 1, 3);
+    currentLevel = clamp(Math.round(level), 1, MAX_LEVEL);
     const cfg = LEVELS[currentLevel];
     currentTargetY = HEIGHT * cfg.targetRatio;
-    targetRow.style.top = `${cfg.targetTopPercent}%`;
+    targetRow.style.top = `${cfg.targetRatio * 100}%`;
     targetLabel.textContent = `TARGET · LV ${currentLevel}`;
+
+    const desiredGroundWidth = currentLevel <= 3 ? 400 : currentLevel === 4 ? 360 : currentLevel === 5 ? 340 : 320;
+    if (desiredGroundWidth !== groundWidth) {
+      Body.scale(ground, desiredGroundWidth / groundWidth, 1);
+      Body.scale(groundGuard, desiredGroundWidth / groundWidth, 1);
+      groundWidth = desiredGroundWidth;
+    }
+  }
+
+  function clampDroppedBodyVelocity() {
+    for (const body of droppedBodies) {
+      if (!body || body.isStatic) continue;
+      const maxSpeed = 14;
+      if (body.speed > maxSpeed) {
+        const dir = Vector.normalise(body.velocity);
+        Body.setVelocity(body, Vector.mult(dir, maxSpeed));
+      }
+      const maxSpin = 0.42;
+      if (Math.abs(body.angularVelocity) > maxSpin) {
+        Body.setAngularVelocity(body, Math.sign(body.angularVelocity) * maxSpin);
+      }
+    }
   }
 
   function ensureMusicStarted() {
@@ -495,10 +822,9 @@
     if (audioCtx.state === "suspended") {
       audioCtx.resume();
     }
-    if (!bgmTimer) {
-      bgmStep = 0;
-      playBgmStep();
-      bgmTimer = setInterval(playBgmStep, 300);
+    if (bgmAudio.paused) {
+      const p = bgmAudio.play();
+      if (p && typeof p.catch === "function") p.catch(() => {});
     }
   }
 
@@ -508,74 +834,8 @@
     if (musicOn) {
       ensureMusicStarted();
     } else {
-      if (bgmTimer) {
-        clearInterval(bgmTimer);
-        bgmTimer = null;
-      }
+      bgmAudio.pause();
     }
-  }
-
-  function playBgmStep() {
-    if (!audioCtx || audioCtx.state !== "running") return;
-
-    // 16-step playful pattern for more melodic variation.
-    const leadA = [523.25, 587.33, 659.25, 698.46, 783.99, 698.46, 659.25, 587.33,
-      523.25, 493.88, 440.0, 493.88, 523.25, 587.33, 659.25, 587.33];
-    const leadB = [659.25, 698.46, 783.99, 880.0, 783.99, 698.46, 659.25, 587.33,
-      659.25, 698.46, 659.25, 587.33, 523.25, 493.88, 523.25, 587.33];
-    const bass = [261.63, 261.63, 293.66, 293.66, 329.63, 329.63, 293.66, 293.66,
-      246.94, 246.94, 261.63, 261.63, 293.66, 293.66, 329.63, 329.63];
-
-    const phrase = Math.floor(bgmStep / 16) % 2;
-    const idx = bgmStep % 16;
-    const leadFreq = (phrase === 0 ? leadA : leadB)[idx];
-    const bassFreq = bass[idx];
-    bgmStep += 1;
-
-    const now = audioCtx.currentTime;
-
-    const lead = audioCtx.createOscillator();
-    const leadGain = audioCtx.createGain();
-    lead.type = "triangle";
-    lead.frequency.setValueAtTime(leadFreq, now);
-    leadGain.gain.setValueAtTime(0.0001, now);
-    leadGain.gain.exponentialRampToValueAtTime(0.075, now + 0.025);
-    leadGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.27);
-
-    const bassOsc = audioCtx.createOscillator();
-    const bassGain = audioCtx.createGain();
-    bassOsc.type = "sine";
-    bassOsc.frequency.setValueAtTime(bassFreq, now);
-    bassGain.gain.setValueAtTime(0.0001, now);
-    bassGain.gain.exponentialRampToValueAtTime(0.032, now + 0.04);
-    bassGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.29);
-
-    lead.connect(leadGain);
-    leadGain.connect(audioCtx.destination);
-    bassOsc.connect(bassGain);
-    bassGain.connect(audioCtx.destination);
-
-    // Add occasional bright harmony notes for a cheerful feel.
-    let harmony = null;
-    let harmonyGain = null;
-    if (idx % 4 === 0 || idx === 7 || idx === 15) {
-      harmony = audioCtx.createOscillator();
-      harmonyGain = audioCtx.createGain();
-      harmony.type = "square";
-      harmony.frequency.setValueAtTime(leadFreq * 1.25, now);
-      harmonyGain.gain.setValueAtTime(0.0001, now);
-      harmonyGain.gain.exponentialRampToValueAtTime(0.016, now + 0.02);
-      harmonyGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
-      harmony.connect(harmonyGain);
-      harmonyGain.connect(audioCtx.destination);
-      harmony.start(now);
-      harmony.stop(now + 0.22);
-    }
-
-    lead.start(now);
-    lead.stop(now + 0.29);
-    bassOsc.start(now);
-    bassOsc.stop(now + 0.31);
   }
 
   function resizeFireworksCanvas() {
@@ -666,15 +926,58 @@
     fireworksCtx.globalAlpha = 1;
   }
 
+  function onCollisionStart(evt) {
+    if (paused || gameEnded || !musicOn) return;
+    for (const pair of evt.pairs) {
+      const bodyA = pair.bodyA.parent || pair.bodyA;
+      const bodyB = pair.bodyB.parent || pair.bodyB;
+      if (!bodyA || !bodyB || bodyA === bodyB) continue;
+
+      const droppedA = bodyA.plugin?.gamePiece && bodyA.plugin?.dropped;
+      const droppedB = bodyB.plugin?.gamePiece && bodyB.plugin?.dropped;
+      if (!droppedA && !droppedB) continue;
+
+      const rel = Vector.sub(bodyA.velocity, bodyB.velocity);
+      const impact = Vector.magnitude(rel);
+      if (impact < 0.5) continue;
+
+      const triggerBody = droppedA ? bodyA : bodyB;
+      const now = performance.now();
+      if (now - (triggerBody.plugin.lastSfxAt || 0) < 80) continue;
+      triggerBody.plugin.lastSfxAt = now;
+      playPopSfx(impact);
+    }
+  }
+
+  function playPopSfx(impact) {
+    ensureMusicStarted();
+    if (!audioCtx || audioCtx.state !== "running") return;
+    const now = audioCtx.currentTime;
+    const loudness = clamp(0.02 + impact * 0.015, 0.02, 0.1);
+    const fall = clamp(impact * 38, 18, 70);
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(520 + impact * 120, now);
+    osc.frequency.exponentialRampToValueAtTime(220 + fall, now + 0.09);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(loudness, now + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.11);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.12);
+  }
+
   function makeSpriteRect(x, y, width, height, asset, friction, restitution, density, spriteScale = 1) {
     const bodyWidth = width * HITBOX_SCALE;
     const bodyHeight = height * HITBOX_SCALE;
     return Bodies.rectangle(x, y, bodyWidth, bodyHeight, {
       chamfer: { radius: 1.5 },
-      friction,
-      frictionStatic: 1,
-      frictionAir: 0.016,
-      restitution,
+      friction: Math.min(1, friction * ROLL_RESIST.frictionMul),
+      frictionStatic: ROLL_RESIST.frictionStatic,
+      frictionAir: 0.016 * ROLL_RESIST.frictionAirMul,
+      restitution: restitution * ROLL_RESIST.restitutionMul,
       density,
       render: {
         sprite: {
@@ -686,7 +989,7 @@
     });
   }
 
-  function makeTetrominoSprite(x, y, cellSize, cells, asset, partColor, friction, restitution, density, spriteScale = 1) {
+  function makeTetrominoSprite(x, y, cellSize, cells, _asset, partColor, friction, restitution, density, _spriteScale = 1) {
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -700,22 +1003,22 @@
 
     const cols = maxX - minX + 1;
     const rows = maxY - minY + 1;
-    const partSize = cellSize * HITBOX_SCALE * 1.02;
+    const partSize = cellSize * 0.95;
     const parts = cells.map(([cx, cy]) => {
       const ox = ((cx - minX) + 0.5 - cols / 2) * cellSize;
       const oy = ((cy - minY) + 0.5 - rows / 2) * cellSize;
       return Bodies.rectangle(x + ox, y + oy, partSize, partSize, {
-        chamfer: { radius: 1.2 },
+        chamfer: { radius: 3 },
         render: { fillStyle: partColor }
       });
     });
 
     return Body.create({
       parts,
-      friction,
-      frictionStatic: 1,
-      frictionAir: 0.016,
-      restitution,
+      friction: Math.min(1, friction * ROLL_RESIST.frictionMul),
+      frictionStatic: ROLL_RESIST.frictionStatic,
+      frictionAir: 0.016 * ROLL_RESIST.frictionAirMul,
+      restitution: restitution * ROLL_RESIST.restitutionMul,
       density,
       render: {
         fillStyle: partColor
@@ -726,10 +1029,10 @@
   function makeSpriteCircle(x, y, radius, asset, friction, restitution, density, spriteScale = 1) {
     const bodyRadius = radius * HITBOX_SCALE;
     return Bodies.circle(x, y, bodyRadius, {
-      friction,
-      frictionStatic: 1,
-      frictionAir: 0.018,
-      restitution,
+      friction: Math.min(1, friction * ROLL_RESIST.frictionMul),
+      frictionStatic: ROLL_RESIST.frictionStatic,
+      frictionAir: 0.018 * ROLL_RESIST.frictionAirMul,
+      restitution: restitution * ROLL_RESIST.restitutionMul,
       density,
       render: {
         sprite: {
@@ -755,10 +1058,10 @@
     }
 
     return Bodies.fromVertices(x, y, [verts], {
-      friction,
-      frictionStatic: 1,
-      frictionAir: 0.02,
-      restitution,
+      friction: Math.min(1, friction * ROLL_RESIST.frictionMul),
+      frictionStatic: ROLL_RESIST.frictionStatic,
+      frictionAir: 0.02 * ROLL_RESIST.frictionAirMul,
+      restitution: restitution * ROLL_RESIST.restitutionMul,
       density,
       render: {
         sprite: {
@@ -771,7 +1074,7 @@
   }
 
   function resolveDropOverlap(body) {
-    const obstacles = [ground, ...droppedBodies];
+    const obstacles = [ground, groundGuard, ...droppedBodies];
     for (let i = 0; i < 48; i += 1) {
       if (!Query.collides(body, obstacles).length) return;
       Body.setPosition(body, { x: body.position.x, y: body.position.y - 2 });
