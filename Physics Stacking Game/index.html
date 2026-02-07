@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Physics Stacking Challenge</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+    <section class="hud top">
+      <button id="pauseBtn" class="icon-btn" aria-label="Pause">II</button>
+      <div class="height-box">
+        <p class="label">Current Height</p>
+        <p id="heightValue" class="value">0.0 m</p>
+      </div>
+      <button id="musicBtn" class="icon-btn" aria-label="Music">♪</button>
+      <button id="restartBtn" class="icon-btn" aria-label="Restart">↻</button>
+    </section>
+
+    <section class="stage-wrap">
+      <div id="gameRoot" class="stage">
+        <div class="target-row">
+          <span></span>
+          <p>Target</p>
+          <span></span>
+        </div>
+      </div>
+
+      <aside class="next-panel">
+        <p>NEXT</p>
+        <div id="nextPreview" class="next-preview"></div>
+      </aside>
+
+      <div id="overlay" class="overlay hidden">
+        <canvas id="fireworksCanvas" class="overlay-fireworks"></canvas>
+        <div class="overlay-content">
+          <h2 id="resultTitle">Game Over</h2>
+          <p id="finalHeight">Height: 0.0 m</p>
+          <button id="playAgain">Play Again</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="hint">
+      Tap to stop rotation, drag to place, release to drop.
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
