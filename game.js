@@ -223,7 +223,14 @@
   bgmAudio.volume = 0.48;
   bgmAudio.preload = "auto";
 
+  // Game timer and leaderboard variables
+  let gameStartTime = null;
+  let completionTime = null;
+  const LEADERBOARD_KEY = "physicsStackingLeaderboard";
+  const MAX_LEADERBOARD_ENTRIES = 3;
+
   setupInputs();
+  gameStartTime = performance.now();  // Initialize game start time
   applyLevel(1);
   spawnPiece();
   updateNextPanel();
@@ -241,7 +248,7 @@
   let testerClicks = 0;
   let testerWindowStart = 0;
   let testerRevealed = false;
-  const TESTER_CLICK_TARGET = 30;
+  const TESTER_CLICK_TARGET = 20;
   const TESTER_WINDOW_MS = 10000;
   function revealTesterButtons() {
     if (skipLevelBtn) skipLevelBtn.style.display = "inline-block";
@@ -603,15 +610,30 @@
         resultTitle.textContent = `Level ${currentLevel} Complete!`;
         finalHeight.textContent = `Height: ${heightValue.textContent} · Next: Level ${currentLevel + 1}`;
         playAgainBtn.textContent = "Next Level";
+        document.getElementById("completionTime").textContent = "";
+        document.getElementById("leaderboardSection").classList.add("hidden");
       } else {
-        resultTitle.textContent = "You Win!";
+        // Game completed - all 6 levels won
+        resultTitle.textContent = "🎉 All Levels Complete!";
         finalHeight.textContent = `Height: ${heightValue.textContent}`;
         playAgainBtn.textContent = "Play Again";
+        
+        // Calculate and display completion time
+        if (gameStartTime && !completionTime) {
+          completionTime = performance.now() - gameStartTime;
+          document.getElementById("completionTime").textContent = `Completion Time: ${formatTime(completionTime)}`;
+          
+          // Save to leaderboard
+          const updatedLeaderboard = addLeaderboardEntry(completionTime);
+          displayLeaderboard();
+        }
       }
     } else {
       resultTitle.textContent = "Game Over";
       finalHeight.textContent = `Height: ${heightValue.textContent} · Level ${currentLevel}`;
       playAgainBtn.textContent = "Try Again";
+      document.getElementById("completionTime").textContent = "";
+      document.getElementById("leaderboardSection").classList.add("hidden");
     }
     stage.classList.add("result-open");
     overlay.classList.remove("hidden");
@@ -760,6 +782,14 @@
     pauseBtn.textContent = "II";
     playAgainBtn.textContent = "Play Again";
     pointer = null;
+    
+    // Reset game timer
+    if (level === 1) {
+      gameStartTime = performance.now();
+      completionTime = null;
+      document.getElementById("completionTime").textContent = "";
+    }
+    
     applyLevel(level);
     if (spawnTimer) {
       clearTimeout(spawnTimer);
@@ -787,7 +817,7 @@
     const cfg = LEVELS[currentLevel];
     currentTargetY = HEIGHT * cfg.targetRatio;
     targetRow.style.top = `${cfg.targetRatio * 100}%`;
-    targetLabel.textContent = `TARGET · LV ${currentLevel}`;
+    targetLabel.textContent = `TARGET · LEVEL ${currentLevel}`;
 
     const desiredGroundWidth = currentLevel <= 3 ? 400 : currentLevel === 4 ? 360 : currentLevel === 5 ? 340 : 320;
     if (desiredGroundWidth !== groundWidth) {
@@ -953,7 +983,8 @@
     ensureMusicStarted();
     if (!audioCtx || audioCtx.state !== "running") return;
     const now = audioCtx.currentTime;
-    const loudness = clamp(0.02 + impact * 0.015, 0.02, 0.1);
+    // increase loudness: raise base and impact multiplier, and raise max cap
+    const loudness = clamp(0.03 + impact * 0.03, 0.03, 0.18);
     const fall = clamp(impact * 38, 18, 70);
 
     const osc = audioCtx.createOscillator();
@@ -1083,5 +1114,58 @@
 
   function clamp(v, min, max) {
     return Math.max(min, Math.min(max, v));
+  }
+
+  function formatTime(ms) {
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    const milliseconds = Math.floor((ms % 1000) / 10);
+    return `${minutes}:${String(seconds).padStart(2, "0")}.${String(milliseconds).padStart(2, "0")}`;
+  }
+
+  function getLeaderboard() {
+    const data = localStorage.getItem(LEADERBOARD_KEY);
+    return data ? JSON.parse(data) : [];
+  }
+
+  function saveLeaderboard(entries) {
+    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(entries));
+  }
+
+  function addLeaderboardEntry(time) {
+    const leaderboard = getLeaderboard();
+    leaderboard.push({
+      time: time,
+      date: new Date().toLocaleString("en-US")
+    });
+    // Sort by time (ascending) and keep only top entries
+    leaderboard.sort((a, b) => a.time - b.time);
+    leaderboard.splice(MAX_LEADERBOARD_ENTRIES);
+    saveLeaderboard(leaderboard);
+    return leaderboard;
+  }
+
+  function displayLeaderboard() {
+    const leaderboard = getLeaderboard();
+    const leaderboardSection = document.getElementById("leaderboardSection");
+    const leaderboardList = document.getElementById("leaderboard");
+
+    if (leaderboard.length === 0) {
+      leaderboardSection.classList.add("hidden");
+      return;
+    }
+
+    leaderboardSection.classList.remove("hidden");
+    leaderboardList.innerHTML = leaderboard
+      .map(
+        (entry, index) =>
+          `<div class="leaderboard-item">
+            <span class="leaderboard-rank">#${index + 1}</span>
+            <span class="leaderboard-time">${formatTime(entry.time)}</span>
+            <span style="font-size: 0.85rem; color: #b3c5d9;">${entry.date}</span>
+          </div>`
+      )
+      .join("");
   }
 })();

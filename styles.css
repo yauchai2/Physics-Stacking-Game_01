@@ -212,6 +212,58 @@ body {
   cursor: pointer;
 }
 
+.completion-time {
+  font-size: 1.1rem;
+  color: #ffdd99;
+  margin: 8px 0 16px !important;
+  font-weight: 700;
+}
+
+.leaderboard-section {
+  margin-top: 16px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+  backdrop-filter: blur(10px);
+}
+
+.leaderboard-section h3 {
+  margin: 0 0 12px 0;
+  font-size: 1.2rem;
+  color: #fff;
+}
+
+.leaderboard-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px 0;
+}
+
+.leaderboard-item {
+  padding: 8px 0;
+  color: #e6f2ff;
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 1rem;
+}
+
+.leaderboard-item:last-child {
+  border-bottom: none;
+}
+
+.leaderboard-rank {
+  font-weight: 700;
+  min-width: 24px;
+}
+
+.leaderboard-time {
+  font-weight: 700;
+  color: #ffdd99;
+}
+
 .hidden {
   display: none;
 }
