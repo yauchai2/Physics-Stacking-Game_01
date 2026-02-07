@@ -6,6 +6,7 @@
     World,
     Bodies,
     Body,
+    Query,
     Composite,
     Events,
     Vector
@@ -37,8 +38,9 @@
 
   const engine = Engine.create({
     gravity: { x: 0, y: 1.05 },
-    positionIterations: 10,
-    velocityIterations: 8
+    enableSleeping: false,
+    positionIterations: 12,
+    velocityIterations: 10
   });
 
   const render = Render.create({
@@ -79,6 +81,12 @@
     bird: { texture: "assets/chocolate-bird.svg", width: 87, height: 94 },
     rabbit: { texture: "assets/chocolate-rabbit.svg", width: 115, height: 165 }
   };
+  const TETROMINO_SHAPES = {
+    boxBlue: [[0, 0], [1, 0], [2, 0], [2, 1]],
+    boxGreen: [[0, 0], [1, 0], [1, 1], [2, 1]],
+    boxOrange: [[0, 0], [1, 0], [2, 0], [1, 1]],
+    boxRed: [[0, 0], [0, 1], [0, 2], [0, 3]]
+  };
   const SIZE_UP = 1.34;
   const HITBOX_SCALE = 0.98;
   const SPRITE_FILL_SCALE = 0.88;
@@ -88,47 +96,47 @@
       kind: "boxBlue",
       weight: 6,
       preview: ASSET_META.boxBlue.texture,
-      maker: (x, y) => makeSpriteRect(x, y, 66 * SIZE_UP, 96 * SIZE_UP, ASSET_META.boxBlue, 0.98, 0.06, 0.0022, 1.12)
+      maker: (x, y) => makeTetrominoSprite(x, y, 34 * SIZE_UP, TETROMINO_SHAPES.boxBlue, ASSET_META.boxBlue, "#2e64d3", 0.98, 0.06, 0.0022, 1.02)
     },
     {
       kind: "boxGreen",
       weight: 6,
       preview: ASSET_META.boxGreen.texture,
-      maker: (x, y) => makeSpriteRect(x, y, 110 * SIZE_UP, 84 * SIZE_UP, ASSET_META.boxGreen, 0.98, 0.05, 0.0021, 1.14)
+      maker: (x, y) => makeTetrominoSprite(x, y, 33 * SIZE_UP, TETROMINO_SHAPES.boxGreen, ASSET_META.boxGreen, "#76cb98", 0.98, 0.05, 0.0021, 1.04)
     },
     {
       kind: "boxOrange",
       weight: 6,
       preview: ASSET_META.boxOrange.texture,
-      maker: (x, y) => makeSpriteRect(x, y, 72 * SIZE_UP, 96 * SIZE_UP, ASSET_META.boxOrange, 0.97, 0.05, 0.00215, 1.12)
+      maker: (x, y) => makeTetrominoSprite(x, y, 33 * SIZE_UP, TETROMINO_SHAPES.boxOrange, ASSET_META.boxOrange, "#f27b1b", 0.97, 0.05, 0.00215, 1.02)
     },
     {
       kind: "boxRed",
       weight: 6,
       preview: ASSET_META.boxRed.texture,
-      maker: (x, y) => makeSpriteRect(x, y, 38 * SIZE_UP, 120 * SIZE_UP, ASSET_META.boxRed, 0.99, 0.04, 0.0023, 1.16)
+      maker: (x, y) => makeTetrominoSprite(x, y, 31 * SIZE_UP, TETROMINO_SHAPES.boxRed, ASSET_META.boxRed, "#ea484c", 0.99, 0.04, 0.0023, 1.04)
     },
     {
       kind: "eggSoftBlue",
-      weight: 1,
+      weight: 2,
       preview: ASSET_META.eggSoftBlue.texture,
       maker: (x, y) => makeSpriteEllipse(x, y, 25 * SIZE_UP, 29 * SIZE_UP, ASSET_META.eggSoftBlue, 0.9, 0.22, 0.0018, 1.1)
     },
     {
       kind: "eggGreen",
-      weight: 1,
+      weight: 2,
       preview: ASSET_META.eggGreen.texture,
       maker: (x, y) => makeSpriteEllipse(x, y, 28 * SIZE_UP, 30 * SIZE_UP, ASSET_META.eggGreen, 0.9, 0.2, 0.00185, 1.1)
     },
     {
       kind: "eggPink",
-      weight: 1,
+      weight: 2,
       preview: ASSET_META.eggPink.texture,
       maker: (x, y) => makeSpriteEllipse(x, y, 28 * SIZE_UP, 30 * SIZE_UP, ASSET_META.eggPink, 0.9, 0.2, 0.00185, 1.1)
     },
     {
       kind: "chocoBird",
-      weight: 1,
+      weight: 2,
       preview: ASSET_META.bird.texture,
       maker: (x, y) => makeSpriteCircle(x, y, 25 * SIZE_UP, ASSET_META.bird, 0.92, 0.16, 0.00195, 1.08)
     },
@@ -272,9 +280,15 @@
     const body = currentPiece.body;
     body.plugin = body.plugin || {};
     body.plugin.droppedAt = performance.now();
+    resolveDropOverlap(body);
     body.collisionFilter.mask = 0xFFFFFFFF;
     Body.setStatic(body, false);
-    Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.04);
+    for (const part of body.parts) {
+      if (part.isStatic) Body.setStatic(part, false);
+    }
+    body.isSleeping = false;
+    Body.setVelocity(body, { x: (Math.random() - 0.5) * 0.04, y: 0.6 });
+    Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.012);
 
     droppedBodies.push(body);
     currentPiece = null;
@@ -484,7 +498,7 @@
     if (!bgmTimer) {
       bgmStep = 0;
       playBgmStep();
-      bgmTimer = setInterval(playBgmStep, 420);
+      bgmTimer = setInterval(playBgmStep, 300);
     }
   }
 
@@ -503,37 +517,65 @@
 
   function playBgmStep() {
     if (!audioCtx || audioCtx.state !== "running") return;
-    const melody = [392, 440, 523.25, 440, 392, 349.23, 329.63, 349.23];
-    const freq = melody[bgmStep % melody.length];
+
+    // 16-step playful pattern for more melodic variation.
+    const leadA = [523.25, 587.33, 659.25, 698.46, 783.99, 698.46, 659.25, 587.33,
+      523.25, 493.88, 440.0, 493.88, 523.25, 587.33, 659.25, 587.33];
+    const leadB = [659.25, 698.46, 783.99, 880.0, 783.99, 698.46, 659.25, 587.33,
+      659.25, 698.46, 659.25, 587.33, 523.25, 493.88, 523.25, 587.33];
+    const bass = [261.63, 261.63, 293.66, 293.66, 329.63, 329.63, 293.66, 293.66,
+      246.94, 246.94, 261.63, 261.63, 293.66, 293.66, 329.63, 329.63];
+
+    const phrase = Math.floor(bgmStep / 16) % 2;
+    const idx = bgmStep % 16;
+    const leadFreq = (phrase === 0 ? leadA : leadB)[idx];
+    const bassFreq = bass[idx];
     bgmStep += 1;
+
     const now = audioCtx.currentTime;
 
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    const pad = audioCtx.createOscillator();
-    const padGain = audioCtx.createGain();
+    const lead = audioCtx.createOscillator();
+    const leadGain = audioCtx.createGain();
+    lead.type = "triangle";
+    lead.frequency.setValueAtTime(leadFreq, now);
+    leadGain.gain.setValueAtTime(0.0001, now);
+    leadGain.gain.exponentialRampToValueAtTime(0.075, now + 0.025);
+    leadGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.27);
 
-    osc.type = "triangle";
-    osc.frequency.setValueAtTime(freq, now);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.055, now + 0.03);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    const bassOsc = audioCtx.createOscillator();
+    const bassGain = audioCtx.createGain();
+    bassOsc.type = "sine";
+    bassOsc.frequency.setValueAtTime(bassFreq, now);
+    bassGain.gain.setValueAtTime(0.0001, now);
+    bassGain.gain.exponentialRampToValueAtTime(0.032, now + 0.04);
+    bassGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.29);
 
-    pad.type = "sine";
-    pad.frequency.setValueAtTime(freq / 2, now);
-    padGain.gain.setValueAtTime(0.0001, now);
-    padGain.gain.exponentialRampToValueAtTime(0.02, now + 0.06);
-    padGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.38);
+    lead.connect(leadGain);
+    leadGain.connect(audioCtx.destination);
+    bassOsc.connect(bassGain);
+    bassGain.connect(audioCtx.destination);
 
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    pad.connect(padGain);
-    padGain.connect(audioCtx.destination);
+    // Add occasional bright harmony notes for a cheerful feel.
+    let harmony = null;
+    let harmonyGain = null;
+    if (idx % 4 === 0 || idx === 7 || idx === 15) {
+      harmony = audioCtx.createOscillator();
+      harmonyGain = audioCtx.createGain();
+      harmony.type = "square";
+      harmony.frequency.setValueAtTime(leadFreq * 1.25, now);
+      harmonyGain.gain.setValueAtTime(0.0001, now);
+      harmonyGain.gain.exponentialRampToValueAtTime(0.016, now + 0.02);
+      harmonyGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+      harmony.connect(harmonyGain);
+      harmonyGain.connect(audioCtx.destination);
+      harmony.start(now);
+      harmony.stop(now + 0.22);
+    }
 
-    osc.start(now);
-    osc.stop(now + 0.36);
-    pad.start(now);
-    pad.stop(now + 0.4);
+    lead.start(now);
+    lead.stop(now + 0.29);
+    bassOsc.start(now);
+    bassOsc.stop(now + 0.31);
   }
 
   function resizeFireworksCanvas() {
@@ -631,6 +673,7 @@
       chamfer: { radius: 1.5 },
       friction,
       frictionStatic: 1,
+      frictionAir: 0.016,
       restitution,
       density,
       render: {
@@ -643,11 +686,49 @@
     });
   }
 
+  function makeTetrominoSprite(x, y, cellSize, cells, asset, partColor, friction, restitution, density, spriteScale = 1) {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const [cx, cy] of cells) {
+      minX = Math.min(minX, cx);
+      minY = Math.min(minY, cy);
+      maxX = Math.max(maxX, cx);
+      maxY = Math.max(maxY, cy);
+    }
+
+    const cols = maxX - minX + 1;
+    const rows = maxY - minY + 1;
+    const partSize = cellSize * HITBOX_SCALE * 1.02;
+    const parts = cells.map(([cx, cy]) => {
+      const ox = ((cx - minX) + 0.5 - cols / 2) * cellSize;
+      const oy = ((cy - minY) + 0.5 - rows / 2) * cellSize;
+      return Bodies.rectangle(x + ox, y + oy, partSize, partSize, {
+        chamfer: { radius: 1.2 },
+        render: { fillStyle: partColor }
+      });
+    });
+
+    return Body.create({
+      parts,
+      friction,
+      frictionStatic: 1,
+      frictionAir: 0.016,
+      restitution,
+      density,
+      render: {
+        fillStyle: partColor
+      }
+    });
+  }
+
   function makeSpriteCircle(x, y, radius, asset, friction, restitution, density, spriteScale = 1) {
     const bodyRadius = radius * HITBOX_SCALE;
     return Bodies.circle(x, y, bodyRadius, {
       friction,
       frictionStatic: 1,
+      frictionAir: 0.018,
       restitution,
       density,
       render: {
@@ -676,6 +757,7 @@
     return Bodies.fromVertices(x, y, [verts], {
       friction,
       frictionStatic: 1,
+      frictionAir: 0.02,
       restitution,
       density,
       render: {
@@ -686,6 +768,14 @@
         }
       }
     }, true);
+  }
+
+  function resolveDropOverlap(body) {
+    const obstacles = [ground, ...droppedBodies];
+    for (let i = 0; i < 48; i += 1) {
+      if (!Query.collides(body, obstacles).length) return;
+      Body.setPosition(body, { x: body.position.x, y: body.position.y - 2 });
+    }
   }
 
   function clamp(v, min, max) {
