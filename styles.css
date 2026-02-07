@@ -13,7 +13,8 @@
 
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100svh;
+  height: 100svh;
   font-family: "Baloo 2", cursive;
   color: var(--ink);
   background:
@@ -23,10 +24,11 @@ body {
   display: grid;
   place-items: center;
   padding: 12px;
+  overflow: hidden;
 }
 
 .app {
-  width: min(100%, 520px);
+  width: min(100%, 520px, calc((100svh - 170px) * 10 / 14));
 }
 
 .hud {
@@ -220,5 +222,45 @@ body {
     right: 6px;
     top: 92px;
     width: 84px;
+  }
+}
+
+@media (max-height: 900px) {
+  .app {
+    width: min(100%, 500px, calc((100svh - 150px) * 10 / 14));
+  }
+
+  .hud {
+    margin-bottom: 6px;
+  }
+
+  .hint {
+    margin-top: 6px;
+    font-size: 0.94rem;
+  }
+}
+
+@media (max-height: 820px) {
+  body {
+    padding: 8px;
+  }
+
+  .app {
+    width: min(100%, 460px, calc((100svh - 128px) * 10 / 14));
+  }
+
+  .icon-btn {
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+  }
+
+  .hud {
+    grid-template-columns: 52px 1fr 52px 52px;
+    gap: 8px;
+  }
+
+  .next-panel {
+    top: 56px;
   }
 }
